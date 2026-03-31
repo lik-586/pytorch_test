@@ -1,159 +1,144 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils import data
-from sklearn.datasets import load_boston
+from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
 import matplotlib.pyplot as plt
 
-# --- 1. 数据集准备 ---
-def load_data(batch_size=10):
-    # 加载波士顿房价数据 (注意：新版 sklearn 需要从 datasets 中导入)
-    boston = load_boston()
-    X, y = boston.data, boston.target
+# 设置随机种子以保证结果可复现
+def set_seed(seed=42):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
 
-    # 数据标准化 (非常重要，否则神经网络很难收敛)
-    scaler_X = StandardScaler()
-    scaler_y = StandardScaler()
-    X_scaled = scaler_X.fit_transform(X)
-    y_scaled = scaler_y.fit_transform(y.reshape(-1, 1)).flatten()
+set_seed()
 
-    # 转换为 PyTorch 张量
-    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-    y_tensor = torch.tensor(y_scaled, dtype=torch.float32)
+# 1. 数据加载与预处理
+print("正在加载加州房价数据集...")
+data = fetch_california_housing()
+X, y = data.data, data.target
 
-    # 划分训练集和测试集
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_tensor, y_tensor, test_size=0.2, random_state=42
-    )
+# 划分训练集和测试集 (80% 训练, 20% 测试)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # 创建 DataLoader
-    train_dataset = data.TensorDataset(X_train, y_train)
-    test_dataset = data.TensorDataset(X_test, y_test)
+# 数据标准化
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
 
-    train_iter = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_iter = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+X_train_scaled = scaler_X.fit_transform(X_train)
+X_test_scaled = scaler_X.transform(X_test)
 
-    return train_iter, test_iter, scaler_y
+# 注意：对于回归任务的目标值y，也进行标准化有助于模型训练
+y_train_scaled = scaler_y.fit_transform(y_train.reshape(-1, 1)).ravel()
+y_test_scaled = scaler_y.transform(y_test.reshape(-1, 1)).ravel()
 
-# --- 2. 自主设计的神经网络结构 ---
-class CustomNet(nn.Module):
-    def __init__(self, input_size):
-        super(CustomNet, self).__init__()
-        # 网络结构设计思路：
-        # 1. 输入层 -> 64维隐藏层 (使用 ReLU)
-        # 2. 64维 -> 32维隐藏层 (使用 ReLU)
-        # 3. 32维 -> 1维输出层 (回归任务，无激活函数)
-        self.net = nn.Sequential(
-            nn.Linear(input_size, 64),
+# 转换为 PyTorch 张量
+X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train_scaled, dtype=torch.float32).view(-1, 1)
+X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.float32).view(-1, 1)
+
+# 2. 定义神经网络模型 (尝试新的结构)
+class DeepRegressionNet(nn.Module):
+    def __init__(self, input_dim=8):
+        super(DeepRegressionNet, self).__init__()
+        self.model = nn.Sequential(
+            # 第一层：引入 BatchNorm 和 Dropout
+            nn.Linear(input_dim, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
+            nn.Dropout(0.3),  # Dropout 30%
+
+            # 第二层：更深的网络结构
             nn.Linear(64, 32),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
+            nn.Dropout(0.2),
+
+            # 输出层：回归任务，输出维度为1
             nn.Linear(32, 1)
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.model(x)
 
-# --- 3. 训练与评估函数 ---
-def train_and_eval():
-    # 超参数设置
-    batch_size = 16
-    num_epochs = 200
-    lr = 0.01
+# 初始化模型、损失函数和优化器
+model = DeepRegressionNet(input_dim=X_train.shape[1])
+criterion = nn.MSELoss()  # 均方误差损失
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4) # Adam + L2正则化
 
-    # 加载数据
-    train_iter, test_iter, scaler_y = load_data(batch_size)
-    input_size = 13  # 波士顿数据集有13个特征
+# 3. 训练模型
+num_epochs = 500
+train_losses = []
+test_losses = []
 
-    # 初始化网络、损失函数和优化器
-    net = CustomNet(input_size)
-    criterion = nn.MSELoss()  # 均方误差损失
-    optimizer = optim.Adam(net.parameters(), lr=lr)  # 使用 Adam 优化器
+print(f"开始训练，共 {num_epochs} 个 Epoch...")
 
-    # 记录训练过程
-    train_losses = []
-    test_losses = []
+for epoch in range(num_epochs):
+    model.train()
+    optimizer.zero_grad()
 
-    print("开始训练...")
-    for epoch in range(num_epochs):
-        net.train()
-        running_loss = 0.0
-        for X, y in train_iter:
-            # 前向传播
-            outputs = net(X).squeeze()  # 去掉多余的维度
-            loss = criterion(outputs, y)
+    # 前向传播
+    outputs = model(X_train_tensor)
+    loss = criterion(outputs, y_train_tensor)
 
-            # 反向传播和优化
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    # 反向传播和优化
+    loss.backward()
+    optimizer.step()
 
-            running_loss += loss.item()
+    # 记录训练损失
+    train_losses.append(loss.item())
 
-        # 记录训练损失
-        avg_train_loss = running_loss / len(train_iter)
-        train_losses.append(avg_train_loss)
-
-        # 验证阶段
-        net.eval()
-        test_loss = 0.0
+    # 在测试集上评估 (每50个epoch打印一次)
+    if (epoch+1) % 50 == 0:
+        model.eval()
         with torch.no_grad():
-            for X, y in test_iter:
-                outputs = net(X).squeeze()
-                loss = criterion(outputs, y)
-                test_loss += loss.item()
-        avg_test_loss = test_loss / len(test_iter)
-        test_losses.append(avg_test_loss)
+            test_outputs = model(X_test_tensor)
+            test_loss = criterion(test_outputs, y_test_tensor)
+            test_losses.append(test_loss.item())
 
-        # 每 20 个 epoch 打印一次
-        if (epoch + 1) % 20 == 0:
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Test Loss: {avg_test_loss:.4f}')
+            # 反标准化预测结果以便计算指标
+            pred_scaled = test_outputs.numpy()
+            y_test_pred = scaler_y.inverse_transform(pred_scaled)
+            y_test_true = scaler_y.inverse_transform(y_test_tensor.numpy())
 
-    # --- 4. 结果可视化 ---
-    plt.figure(figsize=(10, 6))
-    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
-    plt.plot(range(1, num_epochs + 1), test_losses, label='Test Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss (MSE)')
-    plt.title('Training and Testing Loss Curve')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+            rmse = np.sqrt(mean_squared_error(y_test_true, y_test_pred))
+            r2 = r2_score(y_test_true, y_test_pred)
 
-    # --- 5. 精度评价指标 ---
-    # 计算测试集上的 R^2 分数 (决定系数) 和 RMSE
-    from sklearn.metrics import r2_score, mean_squared_error
-    y_true = []
-    y_pred = []
+        print(f'Epoch [{epoch+1}/{num_epochs}], Train Loss: {loss.item():.4f}, '
+              f'Test Loss: {test_loss.item():.4f}, RMSE: {rmse:.4f}, R2 Score: {r2:.4f}')
 
-    net.eval()
-    with torch.no_grad():
-        for X, y in test_iter:
-            outputs = net(X).squeeze()
-            y_true.extend(y.numpy())
-            y_pred.extend(outputs.numpy())
+# 4. 最终评估与绘图
+model.eval()
+with torch.no_grad():
+    final_outputs = model(X_test_tensor)
+    final_pred_scaled = final_outputs.numpy()
+    final_true = y_test_tensor.numpy()
 
-    # 反标准化 (还原到原始房价尺度)
-    y_true = np.array(y_true).reshape(-1, 1)
-    y_pred = np.array(y_pred).reshape(-1, 1)
-    y_true_original = scaler_y.inverse_transform(y_true)
-    y_pred_original = scaler_y.inverse_transform(y_pred)
+    # 反标准化以计算最终指标
+    y_pred = scaler_y.inverse_transform(final_pred_scaled)
+    y_true = scaler_y.inverse_transform(final_true)
 
-    r2 = r2_score(y_true_original, y_pred_original)
-    rmse = np.sqrt(mean_squared_error(y_true_original, y_pred_original))
+    final_rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    final_r2 = r2_score(y_true, y_pred)
 
-    print("\n--- 最终模型性能指标 ---")
-    print(f"决定系数 R^2: {r2:.4f}")  # 越接近 1 越好
-    print(f"均方根误差 RMSE: {rmse:.4f}")  # 越小越好
-    print(f"平均房价预测误差: ±{rmse:.2f} (单位: 千美元)")
+print("\n" + "="*30)
+print("训练完成！")
+print(f"最终测试集 RMSE: {final_rmse:.4f}")
+print(f"最终测试集 R2 Score: {final_r2:.4f}")
+print("="*30)
 
-if __name__ == "__main__":
-    # 检查 PyTorch 是否使用 CPU (你的 MacBook 是 Intel 芯片，所以应该是 CPU)
-    print(f"PyTorch 版本: {torch.__version__}")
-    print(f"设备: {'CPU'}")
-
-    # 运行主程序
-    train_and_eval()
+# 可视化预测结果 vs 真实值
+plt.figure(figsize=(10, 6))
+plt.scatter(y_true, y_pred, alpha=0.6, color='blue', label='Predictions')
+plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2, label='Ideal')
+plt.xlabel('True Values')
+plt.ylabel('Predictions')
+plt.title('California Housing Prediction (True vs Predicted)')
+plt.legend()
+plt.grid(True)
+plt.show()
