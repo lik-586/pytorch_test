@@ -124,7 +124,7 @@ def train_and_predict(data_dir, batch_size=64, num_epochs=100, lr=0.001):
 
     # 保存预测结果到 CSV (用于提交Kaggle)
     test_data = pd.read_csv(f'{data_dir}/test.csv')
-    sub_data = pd.DataFrame({'Id': test_data['Id'], 'SalePrice': preds.reshape(1, -1)[0]})
+    sub_data = pd.DataFrame({'PID': test_data['PID'], 'SalePrice': preds.reshape(1, -1)[0]})
     sub_data.to_csv('submission.csv', index=False)
 
     return preds
@@ -132,7 +132,7 @@ def train_and_predict(data_dir, batch_size=64, num_epochs=100, lr=0.001):
 # 主程序
 if __name__ == '__main__':
     # 修改为你的数据路径
-    DATA_DIR = './house_price_data' # 确保路径正确
+    DATA_DIR = './gsb-544-fall-2025-regression' # 确保路径正确
 
     # 运行训练和预测
     predictions = train_and_predict(DATA_DIR, num_epochs=200)
