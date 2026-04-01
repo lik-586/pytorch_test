@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import pandas as pd
-import numpy as np
 from d2l import torch as d2l
 
 # 1. 加载和预处理数据
@@ -47,7 +46,7 @@ def load_data(data_dir):
 
     return X_train, y_train, X_test, y_mean, y_std
 
-# 2. 定义网络结构 (尝试新结构)
+# 2. 定义网络结构
 # 设计一个包含 BatchNorm 和 Dropout 的深层网络
 class DeepRegressionNet(nn.Module):
     def __init__(self, input_dim):
@@ -88,8 +87,7 @@ def train_and_predict(data_dir, batch_size=64, num_epochs=100, lr=0.001):
     net = DeepRegressionNet(input_dim)
 
     # 定义损失函数和优化器
-    # 为了数值稳定性，我们使用 LogCoshLoss 或 MSELoss
-    # 这里使用 MSELoss
+    # 为了数值稳定性，使用MSELoss
     loss = nn.MSELoss()
 
     # 使用 Adam 优化器，比 SGD 更快更稳定
@@ -103,7 +101,7 @@ def train_and_predict(data_dir, batch_size=64, num_epochs=100, lr=0.001):
             trainer.zero_grad()
             l = loss(net(X), y)
             l.backward()
-            # 关键修改：添加梯度裁剪，防止梯度爆炸
+            # 添加梯度裁剪，防止梯度爆炸
             # max_norm=1 表示梯度的范数最大为 1，超过的部分会被缩放
             nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
 
@@ -131,8 +129,8 @@ def train_and_predict(data_dir, batch_size=64, num_epochs=100, lr=0.001):
 
 # 主程序
 if __name__ == '__main__':
-    # 修改为你的数据路径
-    DATA_DIR = './gsb-544-fall-2025-regression' # 确保路径正确
+    # 数据路径
+    DATA_DIR = './gsb-544-fall-2025-regression'
 
     # 运行训练和预测
     predictions = train_and_predict(DATA_DIR, num_epochs=200)
