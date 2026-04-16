@@ -10,8 +10,8 @@ def load_data(data_dir):
     test_data = pd.read_csv(f'{data_dir}/test.csv')
 
     # 分离特征和标签
-    train_features = train_data.iloc[:, 1:-1]  # 除去ID和SalePrice
-    test_features = test_data.iloc[:, 1:]      # 除去ID
+    train_features = train_data.iloc[:, 1:-1]  # 除去PID和SalePrice
+    test_features = test_data.iloc[:, 1:]      # 除去PID
 
     # 处理类别特征：独热编码（先对所有特征进行独热编码，再分离数值和类别）
     # pd.get_dummies 会自动将字符串列转换为独热向量
